@@ -15,10 +15,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  IMAGE_PATH: harsh804032/streamlit-chatbot
+
 jobs:
-  # ============================================================
-  # 1. CONTINUOUS INTEGRATION
-  # ============================================================
   integration:
     name: Continuous Integration
     runs-on: ubuntu-latest
@@ -28,16 +28,11 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Lint code
-        run: |
-          echo "Linting repository"
+        run: echo "Linting repository"
 
       - name: Run unit tests
-        run: |
-          echo "Running unit tests"
+        run: echo "Running unit tests"
 
-  # ============================================================
-  # 2. BUILD AND PUSH IMAGE TO DOCKER HUB
-  # ============================================================
   push_to_registry:
     name: Build and Push Docker Image
     needs: integration
@@ -46,25 +41,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Validate Docker image settings
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
-        run: |
-          if [ -z "$DOCKER_USERNAME" ]; then
-            echo "DOCKER_USERNAME secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$IMAGE_NAME" ]; then
-            echo "IMAGE_NAME secret is missing."
-            exit 1
-          fi
-
-          IMAGE_PATH="$(echo "${DOCKER_USERNAME}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
-          echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_ENV
-          echo "Using image path: $IMAGE_PATH"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -87,37 +63,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ============================================================
-  # 3. DEPLOY TO AWS EC2 SELF-HOSTED RUNNER
-  # ============================================================
   continuous_deployment:
     name: Deploy to AWS EC2
     needs: push_to_registry
     runs-on: self-hosted
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Validate Docker image settings
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
-        run: |
-          if [ -z "$DOCKER_USERNAME" ]; then
-            echo "DOCKER_USERNAME secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$IMAGE_NAME" ]; then
-            echo "IMAGE_NAME secret is missing."
-            exit 1
-          fi
-
-          IMAGE_PATH="$(echo "${DOCKER_USERNAME}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
-          echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_ENV
-          echo "Using image path: $IMAGE_PATH"
-
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
@@ -180,7 +131,6 @@ jobs:
               echo "Streamlit application is healthy."
               exit 0
             fi
-
             echo "Waiting for Streamlit to become ready..."
             sleep 5
           done
