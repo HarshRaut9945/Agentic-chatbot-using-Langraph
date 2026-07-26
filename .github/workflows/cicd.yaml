@@ -6,11 +6,8 @@ on:
       - main
     paths-ignore:
       - "README.md"
-
-  # Allows you to run the workflow manually
   workflow_dispatch:
 
-# Prevent two deployments from running at the same time
 concurrency:
   group: agentic-chatbot-production
   cancel-in-progress: true
@@ -37,7 +34,6 @@ jobs:
       - name: Run unit tests
         run: |
           echo "Running unit tests"
-
 
   # ============================================================
   # 2. BUILD AND PUSH IMAGE TO DOCKER HUB
@@ -66,7 +62,9 @@ jobs:
             exit 1
           fi
 
-          echo "Docker image settings are configured."
+          IMAGE_PATH="$(echo "${DOCKER_USERNAME}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_ENV
+          echo "Using image path: $IMAGE_PATH"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -84,11 +82,10 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}:main
-            ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}:sha-${{ github.sha }}
+            ${{ env.IMAGE_PATH }}:main
+            ${{ env.IMAGE_PATH }}:sha-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
 
   # ============================================================
   # 3. DEPLOY TO AWS EC2 SELF-HOSTED RUNNER
@@ -99,62 +96,35 @@ jobs:
     runs-on: self-hosted
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker image settings
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          IMAGE_NAME: ${{ secrets.IMAGE_NAME }}
+        run: |
+          if [ -z "$DOCKER_USERNAME" ]; then
+            echo "DOCKER_USERNAME secret is missing."
+            exit 1
+          fi
+
+          if [ -z "$IMAGE_NAME" ]; then
+            echo "IMAGE_NAME secret is missing."
+            exit 1
+          fi
+
+          IMAGE_PATH="$(echo "${DOCKER_USERNAME}/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_PATH=$IMAGE_PATH" >> $GITHUB_ENV
+          echo "Using image path: $IMAGE_PATH"
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Validate application secrets
-        env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-          LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
-          LANGSMITH_ENDPOINT: ${{ secrets.LANGSMITH_ENDPOINT }}
-          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-          LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
-        run: |
-          if [ -z "$GOOGLE_API_KEY" ]; then
-            echo "GOOGLE_API_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$TAVILY_API_KEY" ]; then
-            echo "TAVILY_API_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$OPENWEATHER_API_KEY" ]; then
-            echo "OPENWEATHER_API_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_TRACING" ]; then
-            echo "LANGSMITH_TRACING secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_ENDPOINT" ]; then
-            echo "LANGSMITH_ENDPOINT secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_API_KEY" ]; then
-            echo "LANGSMITH_API_KEY secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LANGSMITH_PROJECT" ]; then
-            echo "LANGSMITH_PROJECT secret is missing."
-            exit 1
-          fi
-
-          echo "All required application secrets are configured."
-
       - name: Pull latest Docker image
-        env:
-          IMAGE_PATH: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
         run: |
           docker pull "${IMAGE_PATH}:main"
 
@@ -164,18 +134,14 @@ jobs:
 
       - name: Run Streamlit container
         env:
-          IMAGE_PATH: ${{ secrets.DOCKER_USERNAME }}/${{ secrets.IMAGE_NAME }}
-
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
-
           LANGSMITH_TRACING: ${{ secrets.LANGSMITH_TRACING }}
           LANGSMITH_ENDPOINT: ${{ secrets.LANGSMITH_ENDPOINT }}
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
           LANGSMITH_PROJECT: ${{ secrets.LANGSMITH_PROJECT }}
-
         run: |
           docker run -d \
             --restart unless-stopped \
@@ -194,17 +160,14 @@ jobs:
       - name: Verify container is running
         run: |
           sleep 10
-
           if ! docker ps \
             --filter "name=^stapp$" \
             --filter "status=running" \
             --format "{{.Names}}" | grep -q "^stapp$"; then
-
             echo "The Streamlit container failed to start."
             docker logs stapp || true
             exit 1
           fi
-
           echo "The Streamlit container is running."
           docker ps --filter "name=^stapp$"
 
@@ -214,7 +177,6 @@ jobs:
             if docker exec stapp python -c \
               "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)" \
               >/dev/null 2>&1; then
-
               echo "Streamlit application is healthy."
               exit 0
             fi
